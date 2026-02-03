@@ -176,6 +176,7 @@ public:
     void mutateAM2_segment(int snLen, int liLen, int nofChunk, std::vector<rlcPDU_t>& db, int lcid);
     void mutateAM2_segment_16bitSN(int snLen, int liLen, int nofChunk, std::vector<rlcPDU_t>& db, int lcid);
     void mutateStatusPDU_AM(int snLen, int nofChunk, std::vector<rlcPDU_t>& db, int lcid);
+    void mutateAM2_large_chunks(int snLen, int liLen, int nofChunk, std::vector<rlcPDU_t>& db, int lcid);
 
 
     void generate_test_cases() override final;

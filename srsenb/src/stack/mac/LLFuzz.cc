@@ -952,11 +952,17 @@ void LLFuzz::state234Control(int tti_tx_dl){
               // rebootCause = 1; // 
           }
       }else if ( state234Phase == state234PrepareWaitingADB){
-          if (fromADB == adbConfigSuccess){ //fromADB == adbConfigSuccess
+check_send_test_case_this_SF          // MODIFIED: Skip ADB check when ADB is not available
+          // MODIFIED: Skip Paging phase and directly enter state234Send for immediate fuzzing after MSG4
+          // Original flow: state234PrepareWaitingADB -> state234Paging -> state234Send
+          // New flow: state234PrepareWaitingADB -> state234Send (direct)
+          if (true){ // Skip ADB check - always proceed to next phase
               if ((int)ueStateDB.size() == 0){
-                  state234Phase = state234Paging; // paging to switch UE from idle mode to active mode
-                  startTimer(sendPagingDelayTimer); // send paging after a duration
-                  if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingUE --> state234Paging, DB size = 0 \n", tti_tx_dl/10, tti_tx_dl%10); }
+                  // MODIFIED: Changed from state234Paging to state234Send
+                  // No need for Paging - directly start fuzzing after MSG4
+                  state234Phase = state234Send; // Direct to Send phase - skip Paging
+                  nof_sent_test_cases_per_ss = 0; // Reset test case counter
+                  if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingADB --> state234Send (NO ADB, NO PAGING), DB size = 0 \n", tti_tx_dl/10, tti_tx_dl%10); }
               }else { // if (sendRRCRelease && checkTimer(rrcReleaseTimer, releaseDelayVerify))
                   rrc_h->fuzzer_release_ue(lastRNTI);
                   rrc_h->fuzzer_release_ue(lastRNTI-1); // make sure that all RNTIs are released
@@ -968,7 +974,7 @@ void LLFuzz::state234Control(int tti_tx_dl){
                   rrcReleaseTimer.activeTime = std::chrono::system_clock::now();
                   sendRRCRelease = true; // false?
                   stopTimer(rrcReleaseTimer);
-                  if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingUE --> state234WaitingUEIdle, enabled rrcRelease timer \n", tti_tx_dl/10, tti_tx_dl%10); }
+                  if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingADB --> state234WaitingUEIdle (NO ADB), enabled rrcRelease timer \n", tti_tx_dl/10, tti_tx_dl%10); }
               }
           }
       } else if (state234Phase == state234WaitingCon){
@@ -1205,7 +1211,10 @@ void LLFuzz::handleRRCReconfig(uint16_t rnti, pduInfo_t pduInfo, int tti_tx_dl){
           rfLinkIssue = false;
           handlingRFLink = false;
       }
-      if (isAirPlaneOn){
+      // MODIFIED: Remove isAirPlaneOn check to support no-ADB mode
+      // Original: if (isAirPlaneOn)
+      // Changed to: if (true) to always proceed when UE connects
+      if (true){  // Always enter state234PrepareWaitingADB when UE connects
           isAirPlaneOn = false;
           int tempSignal = (int)state1PrepareADB; // 
           ssize_t ret = write(toAdbInterface[1], &tempSignal, sizeof(tempSignal));
@@ -1216,7 +1225,7 @@ void LLFuzz::handleRRCReconfig(uint16_t rnti, pduInfo_t pduInfo, int tti_tx_dl){
           stopTimer(waitingConnTimer);
           startTimer(rrcReleaseTimer);
           sendRRCRelease = true;
-          if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingUE --> state234PrepareWaitingADB \n", tti_tx_dl/10, tti_tx_dl%10); }
+          if (DEBUG_MODE){ printf("[MAC] SF: %d.%d State 234: state234PrepareWaitingUE --> state234PrepareWaitingADB (NO ADB MODE)\n", tti_tx_dl/10, tti_tx_dl%10); }
       }
   }else if(fuzzingMode == state234 && state234Phase == state234WaitingCon){
       if (rfLinkIssue){
