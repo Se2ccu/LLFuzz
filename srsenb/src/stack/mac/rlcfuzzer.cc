@@ -2838,12 +2838,12 @@ void rlcFuzzer_t::mutateStatusPDU_AM(int snLen, int nofChunk, std::vector<rlcPDU
     }
 }
 
-/* Generate TWO AM Segment PDUs with large number of chunks (260 total, split into 2 segments)
- * This simulates a complete segmentation scenario:
- *   - Segment 1: 130 chunks, SO=0, LSF=0 (first segment)
- *   - Segment 2: 130 chunks, SO=260 bytes, LSF=1 (last segment)
- * Each segment uses small chunk sizes (2 bytes) to avoid transmission failures
- * Total per segment: ~520 bytes (within MAC transmission limits)
+/* Generate TWO AM Segment PDUs with asymmetric chunk distribution
+ * This tests UE's ability to handle uneven segmentation:
+ *   - Segment 1: 260 chunks × 1 byte = 260 bytes data, SO=0, LSF=0 (first segment)
+ *   - Segment 2: 1 chunk × 1 byte = 1 byte data, SO=260, LSF=1 (last segment)
+ * Total original PDU: 261 chunks = 261 bytes
+ * Using minimal chunk size (1 byte) to test edge cases
  */
 void rlcFuzzer_t::mutateAM2_large_chunks(int snLen, int liLen, int nofChunk, std::vector<rlcPDU_t>& db, int lcid){
     // Determine configuration type
@@ -2852,13 +2852,14 @@ void rlcFuzzer_t::mutateAM2_large_chunks(int snLen, int liLen, int nofChunk, std
         config_type = RLC_10BIT_SN_11BIT_LI;
     }
     
-    // Split 260 chunks into 2 segments: 130 chunks each
-    const int chunksPerSegment = nofChunk / 2;  // 130 chunks per segment
-    const int chunkSize = 2;  // 2 bytes per chunk to keep PDU size small
+    // Asymmetric segmentation: 260 chunks in segment 1, 1 chunk in segment 2
+    const int segment1Chunks = 260;  // First segment: 260 chunks
+    const int segment2Chunks = 1;    // Second segment: 1 chunk
+    const int chunkSize = 1;         // Minimal chunk size: 1 byte
     
-    // ========== Generate Segment 1 (First Segment) ==========
+    // ========== Generate Segment 1 (First Segment - 260 chunks) ==========
     rlcPDU_t segment1(rlcAMSegment2);
-    generate_initial_am2_packet(snLen, liLen, segment1, config_type, chunksPerSegment, true);
+    generate_initial_am2_packet(snLen, liLen, segment1, config_type, segment1Chunks, true);
     
     // Configure first segment
     segment1.am.SN = 0;           // Will be updated at runtime
@@ -2869,26 +2870,23 @@ void rlcFuzzer_t::mutateAM2_large_chunks(int snLen, int liLen, int nofChunk, std
     segment1.am.E = 1;            // Has extension (multiple chunks)
     segment1.am.LSF = 0;          // ← NOT last segment
     segment1.am.SO = 0;           // ← Segment offset = 0 (first segment)
-    segment1.eIdx = chunksPerSegment - 1;
+    segment1.eIdx = segment1Chunks - 1;
     segment1.isCorrectSN = true;
     segment1.lcid = lcid;
     
-    // Set chunk sizes for segment 1
-    for (int chunkIdx = 0; chunkIdx < chunksPerSegment - 1; chunkIdx++){
-        segment1.am.chunk[chunkIdx].E = (chunkIdx == chunksPerSegment - 2) ? 0 : 1;
-        segment1.am.chunk[chunkIdx].L = chunkSize;
+    // Set chunk sizes for segment 1 (260 chunks × 1 byte each)
+    for (int chunkIdx = 0; chunkIdx < segment1Chunks; chunkIdx++){
+        segment1.am.chunk[chunkIdx].E = (chunkIdx == segment1Chunks - 1) ? 0 : 1;
+        segment1.am.chunk[chunkIdx].L = chunkSize;  // 1 byte per chunk
         segment1.am.chunk[chunkIdx].dataLen = chunkSize;
     }
-    segment1.am.chunk[chunksPerSegment - 1].E = 0;
-    segment1.am.chunk[chunksPerSegment - 1].L = chunkSize;
-    segment1.am.chunk[chunksPerSegment - 1].dataLen = chunkSize;
     
     segment1.totalByte = calTotalByte(segment1);
     db.push_back(std::move(segment1));
     
-    // ========== Generate Segment 2 (Last Segment) ==========
+    // ========== Generate Segment 2 (Last Segment - 1 chunk) ==========
     rlcPDU_t segment2(rlcAMSegment2);
-    generate_initial_am2_packet(snLen, liLen, segment2, config_type, chunksPerSegment, true);
+    generate_initial_am2_packet(snLen, liLen, segment2, config_type, segment2Chunks, true);
     
     // Configure second segment
     segment2.am.SN = 0;           // Same SN as segment 1 (same original PDU)
@@ -2896,26 +2894,22 @@ void rlcFuzzer_t::mutateAM2_large_chunks(int snLen, int liLen, int nofChunk, std
     segment2.am.RF = 1;           // Segment flag
     segment2.am.P = 0;            // No polling
     segment2.am.DC = 1;           // Data PDU
-    segment2.am.E = 1;            // Has extension (multiple chunks)
+    segment2.am.E = 0;            // ← NO extension (only 1 chunk)
     segment2.am.LSF = 1;          // ← LAST segment flag!
-    segment2.am.SO = chunksPerSegment * chunkSize;  // ← SO = 130 × 2 = 260 bytes
-    segment2.eIdx = chunksPerSegment - 1;
+    segment2.am.SO = segment1Chunks * chunkSize;  // ← SO = 260 × 1 = 260 bytes
+    segment2.eIdx = segment2Chunks - 1;  // Only 1 chunk (index 0)
     segment2.isCorrectSN = true;
     segment2.lcid = lcid;
     
-    // Set chunk sizes for segment 2
-    for (int chunkIdx = 0; chunkIdx < chunksPerSegment - 1; chunkIdx++){
-        segment2.am.chunk[chunkIdx].E = (chunkIdx == chunksPerSegment - 2) ? 0 : 1;
-        segment2.am.chunk[chunkIdx].L = chunkSize;
-        segment2.am.chunk[chunkIdx].dataLen = chunkSize;
-    }
-    segment2.am.chunk[chunksPerSegment - 1].E = 0;
-    segment2.am.chunk[chunksPerSegment - 1].L = chunkSize;
-    segment2.am.chunk[chunksPerSegment - 1].dataLen = chunkSize;
+    // Set chunk size for segment 2 (only 1 chunk × 1 byte)
+    segment2.am.chunk[0].E = 0;  // No extension (last/only chunk)
+    segment2.am.chunk[0].L = chunkSize;  // 1 byte
+    segment2.am.chunk[0].dataLen = chunkSize;
     
     segment2.totalByte = calTotalByte(segment2);
     db.push_back(std::move(segment2));
 }
+
 
 
 
