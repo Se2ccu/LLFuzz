@@ -1314,6 +1314,14 @@ bool LLFuzz::check_send_test_case_this_SF(int tti_tx_dl){
   idx[fuzzingState] = fuzzer->get_cur_testcase_idx(fuzzingState, readFromFileMode);
   bool hasTestCase = idx[fuzzingState] < total_idx[fuzzingState];
 
+  // DIAGNOSTIC: Log all conditions for state234
+  if (DEBUG_MODE && fuzzingMode == state234){
+    printf("[MAC] SF: %d.%d check_send_test_case_this_SF: ueStateDB.size=%d, state234Phase=%d, curRNTIState=%d, fuzzingState=%d, enableState=%d, triggerTTI=%d, hasTestCase=%d, idx=%d, total_idx=%d\n",
+           tti_tx_dl/10, tti_tx_dl%10, (int)ueStateDB.size(), state234Phase, 
+           curRNTIState, fuzzingState, enableState, triggerTTI, hasTestCase,
+           idx[fuzzingState], total_idx[fuzzingState]);
+  }
+
   switch (fuzzingMode)
   {
   case state234:
@@ -1321,14 +1329,29 @@ bool LLFuzz::check_send_test_case_this_SF(int tti_tx_dl){
           if (ueStateDB.size() == 1 && state234Phase == state234Send){ // only send TC when there is a single UE in state 2, 3, 4
 
               if (!readFromFileMode){                                 // tti that ue state has been changed
+                  // DIAGNOSTIC: Log timing check for state3
+                  if (DEBUG_MODE && curRNTIState == LLState_t::state3){
+                    bool timingOK = checkSendTCttiState3(triggerTTI, tti_tx_dl, nof_test_cases_per_ss);
+                    printf("[MAC] SF: %d.%d checkSendTCttiState3: triggerTTI=%d, curTTI=%d, nof_test_cases_per_ss=%d, result=%d\n",
+                           tti_tx_dl/10, tti_tx_dl%10, triggerTTI, tti_tx_dl, nof_test_cases_per_ss, timingOK);
+                  }
+                  
                   if ((enableState && curRNTIState == LLState_t::state2 && checkSendTCttiState2(triggerTTI, tti_tx_dl, nof_test_cases_per_ss) && hasTestCase) || 
                       (enableState && curRNTIState == LLState_t::state3 && checkSendTCttiState3(triggerTTI, tti_tx_dl, nof_test_cases_per_ss) && hasTestCase) ||
                       (enableState && curRNTIState == LLState_t::state4 && checkSendTCttiState4(triggerTTI, tti_tx_dl, nof_test_cases_per_ss) && hasTestCase)){
                       ret = true;
                       sendTCThisSF = true;
+                      if (DEBUG_MODE){
+                        printf("[MAC] SF: %d.%d sendTCThisSF = TRUE, will send test case idx=%d\n",
+                               tti_tx_dl/10, tti_tx_dl%10, idx[fuzzingState]);
+                      }
                   }else{
                       ret = false;
-                      sendTCThisSF = false;   
+                      sendTCThisSF = false;
+                      if (DEBUG_MODE && curRNTIState == fuzzingState){
+                        printf("[MAC] SF: %d.%d sendTCThisSF = FALSE (conditions not met)\n",
+                               tti_tx_dl/10, tti_tx_dl%10);
+                      }
                   }
               }else if (readFromFileMode && verifyingState == curRNTIState){ // verify test case from file
                   if ((curRNTIState == LLState_t::state2 && checkSendTCttiState2(triggerTTI, tti_tx_dl, 1) && hasTestCase) || 
@@ -1566,7 +1589,42 @@ void LLFuzz::addUE(uint16_t rnti, LLState_t state, int tti){
   ueStateTTI.tti   = tti;
   ueStateDB.insert(std::make_pair(rnti, ueStateTTI));
   bufferLock.unlock();
+  
+  // ADDED: Trigger state transition when UE connects in state234 mode
+  // This fixes the issue where state234PrepareWaitingUE never transitions to state234PrepareWaitingADB
+  // MODIFIED: Also trigger from state234Prepare phase to handle early UE connections
+  if (fuzzingMode == state234 && 
+      (state234Phase == state234PrepareWaitingUE || state234Phase == state234Prepare)){
+      if (rfLinkIssue){
+          rfLinkIssue = false;
+          handlingRFLink = false;
+      }
+      // Always enter state234PrepareWaitingADB when UE connects (no ADB mode)
+      if (true){
+          // isAirPlaneOn = false;
+          // int tempSignal = (int)state1PrepareADB;
+          // ssize_t ret = write(toAdbInterface[1], &tempSignal, sizeof(tempSignal));
+          // int curTTI = tti;
+          // ssize_t ret2 = write(ttiPipe[1], &curTTI, sizeof(curTTI));
+          state234Phase = state234PrepareWaitingADB;
+          timeOutCnt = 0;
+          stopTimer(waitingConnTimer);
+          stopTimer(adbDelayTimer);  // Also stop adbDelayTimer in case we're in Prepare phase
+          // REMOVED: Don't start rrcReleaseTimer or set sendRRCRelease here
+          // These are only needed when releasing existing UEs
+          // startTimer(rrcReleaseTimer);
+          // sendRRCRelease = true;
+          if (DEBUG_MODE){ 
+              printf("[MAC] SF: %d.%d State 234: %s --> state234PrepareWaitingADB (triggered by addUE, DB size = %d)\n", 
+                     tti/10, tti%10, 
+                     (state234Phase == state234Prepare ? "state234Prepare" : "state234PrepareWaitingUE"),
+                     (int)ueStateDB.size()); 
+          }
+      }
+  }
 }
+
+
 
 void LLFuzz::clearUEDB(){
     std::unique_lock<std::mutex> bufferLock(ueStateMutex);
